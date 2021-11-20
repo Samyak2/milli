@@ -1,7 +1,7 @@
 use std::{cmp, fmt, mem};
 
 use fst::Set;
-use meilisearch_tokenizer::token::SeparatorKind;
+use meilisearch_tokenizer::token::{SeparatorKind, Token};
 use meilisearch_tokenizer::tokenizer::TokenStream;
 use meilisearch_tokenizer::TokenKind;
 use roaring::RoaringBitmap;
@@ -221,7 +221,7 @@ impl<'a> QueryTreeBuilder<'a> {
     /// - if `authorize_typos` is set to `false` the query tree will be generated
     ///   forcing all query words to match documents without any typo
     ///   (the criterion `typo` will be ignored)
-    pub fn build(&self, query: TokenStream) -> Result<Option<(Operation, PrimitiveQuery)>> {
+    pub fn build(&self, query: TokenStream<'a>) -> Result<Option<(Operation, PrimitiveQuery)>> {
         let stop_words = self.index.stop_words(self.rtxn)?;
         let primitive_query = create_primitive_query(query, stop_words, self.words_limit);
         if !primitive_query.is_empty() {
@@ -311,13 +311,13 @@ fn create_query_tree(
             // 2. try to fetch synonyms
             // 3. create an operation containing the word
             // 4. wrap all in an OR operation
-            PrimitiveQueryPart::Word(word, prefix) => {
-                let mut children = synonyms(ctx, &[&word])?.unwrap_or_default();
-                if let Some(child) = split_best_frequency(ctx, &word)? {
+            PrimitiveQueryPart::Word(token, prefix) => {
+                let mut children = synonyms(ctx, &[&token.word.as_ref()])?.unwrap_or_default();
+                if let Some(child) = split_best_frequency(ctx, &token.word.as_ref())? {
                     children.push(child);
                 }
                 children
-                    .push(Operation::Query(Query { prefix, kind: typos(word, authorize_typos) }));
+                    .push(Operation::Query(Query { prefix, kind: typos(token.word.to_string(), authorize_typos) }));
                 Ok(Operation::or(false, children))
             }
             // create a CONSECUTIVE operation wrapping all word in the phrase
@@ -354,8 +354,8 @@ fn create_query_tree(
                             let words: Vec<_> = words
                                 .iter()
                                 .filter_map(|part| {
-                                    if let PrimitiveQueryPart::Word(word, _) = part {
-                                        Some(word.as_str())
+                                    if let PrimitiveQueryPart::Word(token, _) = part {
+                                        Some(token.word.as_ref())
                                     } else {
                                         None
                                     }
@@ -424,15 +424,15 @@ fn create_query_tree(
     }
 }
 
-pub type PrimitiveQuery = Vec<PrimitiveQueryPart>;
+pub type PrimitiveQuery<'a> = Vec<PrimitiveQueryPart<'a>>;
 
 #[derive(Debug, Clone)]
-pub enum PrimitiveQueryPart {
+pub enum PrimitiveQueryPart<'a> {
     Phrase(Vec<String>),
-    Word(String, IsPrefix),
+    Word(Token<'a>, IsPrefix),
 }
 
-impl PrimitiveQueryPart {
+impl PrimitiveQueryPart<'_> {
     fn is_phrase(&self) -> bool {
         matches!(self, Self::Phrase(_))
     }
@@ -444,11 +444,11 @@ impl PrimitiveQueryPart {
 
 /// Create primitive query from tokenized query string,
 /// the primitive query is an intermediate state to build the query tree.
-fn create_primitive_query(
-    query: TokenStream,
+fn create_primitive_query<'a>(
+    query: TokenStream<'a>,
     stop_words: Option<Set<&[u8]>>,
     words_limit: Option<usize>,
-) -> PrimitiveQuery {
+) -> PrimitiveQuery<'a> {
     let mut primitive_query = Vec::new();
     let mut phrase = Vec::new();
     let mut quoted = false;
@@ -475,10 +475,10 @@ fn create_primitive_query(
                         .map_or(false, |swords| swords.contains(token.word.as_ref()))
                     {
                         primitive_query
-                            .push(PrimitiveQueryPart::Word(token.word.to_string(), false));
+                            .push(PrimitiveQueryPart::Word(token, false));
                     }
                 } else {
-                    primitive_query.push(PrimitiveQueryPart::Word(token.word.to_string(), true));
+                    primitive_query.push(PrimitiveQueryPart::Word(token, true));
                 }
             }
             TokenKind::Separator(separator_kind) => {
@@ -547,13 +547,13 @@ mod test {
     }
 
     impl TestContext {
-        fn build(
+        fn build<'a>(
             &self,
             optional_words: bool,
             authorize_typos: bool,
             words_limit: Option<usize>,
-            query: TokenStream,
-        ) -> Result<Option<(Operation, PrimitiveQuery)>> {
+            query: TokenStream<'a>,
+        ) -> Result<Option<(Operation, PrimitiveQuery<'a>)>> {
             let primitive_query = create_primitive_query(query, None, words_limit);
             if !primitive_query.is_empty() {
                 let qt =

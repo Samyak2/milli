@@ -345,8 +345,8 @@ impl ExactQueryPart {
         part: &PrimitiveQueryPart,
     ) -> heed::Result<Self> {
         let part = match part {
-            PrimitiveQueryPart::Word(word, _) => {
-                match ctx.synonyms(word)? {
+            PrimitiveQueryPart::Word(token, _) => {
+                match ctx.synonyms(token.word.as_ref())? {
                     Some(synonyms) => {
                         let mut synonyms: Vec<_> = synonyms
                             .into_iter()
@@ -358,10 +358,10 @@ impl ExactQueryPart {
                                 }
                             })
                             .collect();
-                        synonyms.push(word.clone());
+                        synonyms.push(token.word.to_string());
                         ExactQueryPart::Synonyms(synonyms)
                     }
-                    None => ExactQueryPart::Synonyms(vec![word.clone()]),
+                    None => ExactQueryPart::Synonyms(vec![token.word.to_string()]),
                 }
             }
             PrimitiveQueryPart::Phrase(phrase) => ExactQueryPart::Phrase(phrase.clone()),

@@ -121,7 +121,8 @@ impl<'a> Search<'a> {
                 let analyzer = Analyzer::new(config);
                 let result = analyzer.analyze(query);
                 let tokens = result.tokens();
-                builder.build(tokens)?.map_or((None, None), |(qt, pq)| (Some(qt), Some(pq)))
+                let (query_tree, primitive_query) = builder.build(tokens)?.map_or((None, None), |(qt, pq)| (Some(qt), Some(pq)));
+                (query_tree, primitive_query.clone())
             }
             None => (None, None),
         };
